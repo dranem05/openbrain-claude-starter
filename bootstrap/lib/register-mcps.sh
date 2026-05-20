@@ -125,7 +125,9 @@ def stdio(name, script, *args):
     }
 
 # Remove any openbrain-managed entries before re-writing
-managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "slack_")
+managed_prefixes = ("asana_", "gmail_", "gcal_", "gmeet_", "gdrive_", "gslides_", "google_", "slack_")
+# ↑ Legacy per-service prefixes (gmail_, gcal_, etc.) kept in the cleanup list
+#   so re-running register-mcps removes stale entries from ~/.claude.json
 for k in list(servers.keys()):
     v = servers[k]
     cmd = v.get("command", "") if isinstance(v, dict) else ""
@@ -140,10 +142,7 @@ if plan["has_asana_work"]:
 
 for slug in plan["google_slugs"]:
     key = slug.replace("-", "_")
-    stdio(f"gmail_{key}",  "gmail-mcp.sh",  slug)
-    stdio(f"gcal_{key}",   "gcal-mcp.sh",   slug)
-    stdio(f"gmeet_{key}",  "gmeet-mcp.sh",  slug)
-    stdio(f"gdrive_{key}", "gdrive-mcp.sh", slug)
+    stdio(f"google_{key}", "google-mcp.sh", slug)
 
 for slug in plan["slack_slugs"]:
     key = slug.replace("-", "_")
