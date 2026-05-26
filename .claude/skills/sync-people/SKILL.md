@@ -1,9 +1,9 @@
 ---
-name: people-sync
+name: sync-people
 description: Discovery pass across Gmail, Google Calendar, Slack, and Fathom to find unknown people and stale contacts. Stages new-person candidates in + Inbox/people-candidates/ and auto-updates last_contact on existing people notes.
 ---
 
-# /people-sync
+# /sync-people
 
 Scan recent activity across all multi-account MCPs and Fathom, propose new person notes for unknown humans, update `last_contact` for known ones, and surface alias merges. Never writes directly to `+ Atlas/People/` — candidates stage in `+ Inbox/people-candidates/` for review.
 
@@ -87,7 +87,7 @@ Scan recent activity across all multi-account MCPs and Fathom, propose new perso
     # <Full Name>
 
     ## Context
-    <!-- Auto-staged by /people-sync on <today>. Review before promoting to + Atlas/People/. -->
+    <!-- Auto-staged by /sync-people on <today>. Review before promoting to + Atlas/People/. -->
 
     ## Evidence
     - <source-slug> · <date> · <1-line context: subject line, event title, or channel>
