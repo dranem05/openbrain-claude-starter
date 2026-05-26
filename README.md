@@ -119,7 +119,7 @@ Each script is idempotent — safe to re-run.
 | `/follow-up-draft` | Draft a reply email/Slack message (never sends) |
 | `/what-am-i-missing` | Surface overdue tasks, cadence misses, unanswered mail |
 | `/people-audit` | Cadence health report + regenerate People MOC |
-| `/people-sync` | Discovery pass across Gmail/Calendar/Slack to find unknown people |
+| `/sync-people` | Discovery pass across Gmail/Calendar/Slack to find unknown people |
 | `/weekly-review` | Monday synthesis |
 | `/push-openbrain-claude-starter` | Genericize vault improvements and open a PR against the template repo |
 | `/pull-openbrain-claude-starter` | Pull latest template changes into the vault interactively |
