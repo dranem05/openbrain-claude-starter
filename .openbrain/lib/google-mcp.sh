@@ -11,6 +11,10 @@ OAUTH_CLIENT="$TOKEN_DIR/oauth-client.json"
 CREDS_FILE="$TOKEN_DIR/google-${SLUG}-credentials.json"
 SERVER="$HOME/google-mcp/dist/index.js"
 
+# Keep oauth-client.json in lockstep with .env (single source of truth). _common.sh
+# already ran load_env, so this picks up any edit to the secret on the next spawn.
+sync_oauth_client_json
+
 [[ -f "$OAUTH_CLIENT" ]] || die "shared OAuth client missing: $OAUTH_CLIENT (run bootstrap/lib/add-google-account.sh $SLUG)"
 [[ -f "$CREDS_FILE" ]] || die "per-account credentials missing: $CREDS_FILE (run add-google-account.sh)"
 ensure_mcp_server "google-mcp"

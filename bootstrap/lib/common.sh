@@ -322,3 +322,64 @@ load_env() {
   # shellcheck disable=SC1090
   set -a; source "$ENV_FILE"; set +a
 }
+
+# ---------- Google OAuth client: .env as single source of truth ----------
+# The OAuth client_id/secret live canonically in .env. oauth-client.json (read
+# by the google-mcp node server and by the OAuth mint flow) is a DERIVED cache,
+# and .oauth-fingerprint records which client the connected accounts belong to.
+# Regenerating the json from .env at every entry point means editing .env in one
+# place propagates everywhere — closing the stale-secret gap where editing .env
+# alone left the never-refreshed json in charge.
+OAUTH_CLIENT_JSON="${OAUTH_CLIENT_JSON:-$TOKEN_DIR/oauth-client.json}"
+OAUTH_FINGERPRINT_FILE="${OAUTH_FINGERPRINT_FILE:-$TOKEN_DIR/.oauth-fingerprint}"
+
+sync_oauth_client_json() {
+  # Rewrite oauth-client.json from the current .env client_id/secret. Idempotent
+  # and atomic (temp file + mv). No-op if the env vars aren't set, so we never
+  # make a working setup worse.
+  [[ -n "${GOOGLE_OAUTH_CLIENT_ID:-}" && -n "${GOOGLE_OAUTH_CLIENT_SECRET:-}" ]] || return 0
+  mkdir -p "$TOKEN_DIR"; chmod 700 "$TOKEN_DIR" 2>/dev/null || true
+  local tmp; tmp="$(mktemp "${TOKEN_DIR}/.oauth-client.XXXXXX")"
+  cat >"$tmp" <<JSON
+{
+  "installed": {
+    "client_id": "${GOOGLE_OAUTH_CLIENT_ID}",
+    "client_secret": "${GOOGLE_OAUTH_CLIENT_SECRET}",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "redirect_uris": ["http://localhost"]
+  }
+}
+JSON
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$OAUTH_CLIENT_JSON"
+}
+
+oauth_fingerprint() {
+  # Stable fingerprint of the current .env OAuth client identity. Fails (1) if
+  # the env vars aren't set so callers can skip cleanly.
+  [[ -n "${GOOGLE_OAUTH_CLIENT_ID:-}" && -n "${GOOGLE_OAUTH_CLIENT_SECRET:-}" ]] || return 1
+  printf '%s:%s' "$GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_SECRET" \
+    | { shasum -a 256 2>/dev/null || sha256sum; } | awk '{print $1}'
+}
+
+write_oauth_fingerprint() {
+  # Record the client fingerprint the current account tokens were minted
+  # against. Called after a successful OAuth flow; clears any prior drift.
+  local fp; fp="$(oauth_fingerprint)" || return 0
+  mkdir -p "$TOKEN_DIR"; chmod 700 "$TOKEN_DIR" 2>/dev/null || true
+  printf '%s\n' "$fp" > "$OAUTH_FINGERPRINT_FILE"
+  chmod 600 "$OAUTH_FINGERPRINT_FILE"
+}
+
+auth_drift_detected() {
+  # True (0) when a baseline fingerprint exists AND differs from the current
+  # .env identity — i.e. the OAuth client changed since accounts were last
+  # connected, so existing logins may need refreshing. False on first run (no
+  # baseline) or when they match.
+  [[ -f "$OAUTH_FINGERPRINT_FILE" ]] || return 1
+  local current stored
+  current="$(oauth_fingerprint)" || return 1
+  stored="$(cat "$OAUTH_FINGERPRINT_FILE" 2>/dev/null || true)"
+  [[ -n "$stored" && "$current" != "$stored" ]]
+}
