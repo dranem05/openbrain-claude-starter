@@ -358,7 +358,13 @@ oauth_fingerprint() {
   local id secret
   id="$(_oauth_env "$provider" CLIENT_ID)"; secret="$(_oauth_env "$provider" CLIENT_SECRET)"
   [[ -n "$id" && -n "$secret" ]] || return 1
-  printf '%s:%s' "$id" "$secret" | { shasum -a 256 2>/dev/null || sha256sum; } | awk '{print $1}'
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s:%s' "$id" "$secret" | shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s:%s' "$id" "$secret" | sha256sum | awk '{print $1}'
+  else
+    return 1
+  fi
 }
 
 write_oauth_fingerprint() {
