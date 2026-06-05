@@ -14,7 +14,7 @@ SERVER="$HOME/google-mcp/dist/index.js"
 # (see google-mcp src/auth.ts) — NOT from oauth-client.json — so we neither check
 # for nor regenerate that file here. The client config is a mint-time artifact,
 # written from .env by setup-google-oauth.sh / add-google-account.sh.
-[[ -f "$CREDS_FILE" ]] || die "per-account credentials missing: $CREDS_FILE (run add-google-account.sh $SLUG)"
+[[ -f "$CREDS_FILE" ]] || die "per-account credentials missing: $CREDS_FILE (run bootstrap/lib/add-google-account.sh <email>)"
 ensure_mcp_server "google-mcp"
 
 exec node "$SERVER" --slug "$SLUG"
