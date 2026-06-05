@@ -315,6 +315,9 @@ load_env() {
 # explicit provider is the whole point of namespacing (a default would silently
 # act on google). The client-config WRITER is provider-specific (the json shape
 # differs per provider), so it's an explicit per-provider function.
+#
+# To add a provider (e.g. microsoft), see "Adding another OAuth provider" in
+# bootstrap/README.md — the step-by-step convention.
 
 # Resolve a per-provider .env var: _oauth_env google CLIENT_ID -> $GOOGLE_OAUTH_CLIENT_ID
 _oauth_env() {
