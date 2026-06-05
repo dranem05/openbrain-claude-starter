@@ -140,31 +140,6 @@ ensure_mcp_server() {
   echo "openbrain mcp: $name installed at $server" >&2
 }
 
-# Regenerate the derived oauth-client.json from the .env client_id/secret so
-# .env stays the single source of truth. Called by the Google launcher on every
-# spawn: edit .env, restart, the MCP picks up the new secret — no stale json.
-# Idempotent + atomic; no-op if the env vars aren't set (load_env runs first).
-sync_oauth_client_json() {
-  [[ -n "${GOOGLE_OAUTH_CLIENT_ID:-}" && -n "${GOOGLE_OAUTH_CLIENT_SECRET:-}" ]] || return 0
-  local token_dir="${TOKEN_DIR:-$HOME/.config/openbrain/tokens}"
-  local out="$token_dir/oauth-client.json"
-  mkdir -p "$token_dir"; chmod 700 "$token_dir" 2>/dev/null || true
-  local tmp; tmp="$(mktemp "${token_dir}/.oauth-client.XXXXXX")"
-  cat >"$tmp" <<JSON
-{
-  "installed": {
-    "client_id": "${GOOGLE_OAUTH_CLIENT_ID}",
-    "client_secret": "${GOOGLE_OAUTH_CLIENT_SECRET}",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "redirect_uris": ["http://localhost"]
-  }
-}
-JSON
-  chmod 600 "$tmp"
-  mv -f "$tmp" "$out"
-}
-
 ensure_node_on_path
 install_browser_suppressor
 load_env

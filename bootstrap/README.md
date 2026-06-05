@@ -29,7 +29,7 @@ All live in `bootstrap/lib/`. Safe to run directly any time.
 
 ### `setup-google-oauth.sh`
 
-One-time GCP Desktop OAuth client setup. Walks you through enabling the 6 Google APIs, creating the OAuth consent screen, and generating a Desktop client ID. Stores `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `~/.config/openbrain/.env` and writes `~/.config/openbrain/tokens/oauth-client.json`.
+One-time GCP Desktop OAuth client setup. Walks you through enabling the 6 Google APIs, creating the OAuth consent screen, and generating a Desktop client ID. Stores `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `~/.config/openbrain/.env` and writes `~/.config/openbrain/tokens/google-oauth-client.json` (derived from `.env`).
 
 Re-run to rotate the client credentials.
 
