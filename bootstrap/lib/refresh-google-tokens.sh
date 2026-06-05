@@ -96,7 +96,7 @@ case "${1:-}" in
     # sentinels so a consumer's SessionStart hook can surface it verbatim,
     # regardless of whether the probe below succeeds or fails. We only nudge;
     # the actual reconnect is the user's call (per account).
-    if auth_drift_detected; then
+    if auth_drift_detected google; then
       printf 'OPENBRAIN_AUTH_NUDGE_BEGIN\n'
       printf '🔑 Heads up — your Google connection settings changed.\n'
       printf 'The security details for your Google sign-in were updated since you last\n'

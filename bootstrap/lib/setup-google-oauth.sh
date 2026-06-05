@@ -80,12 +80,13 @@ env_set_var GOOGLE_OAUTH_CLIENT_ID "$CLIENT_ID"
 env_set_var GOOGLE_OAUTH_CLIENT_SECRET "$CLIENT_SECRET"
 chmod 600 "$ENV_FILE"
 
-# Also write the derived oauth-client.json (the google-mcp node server reads it).
-# .env is the single source of truth; this json is regenerated from it via the
-# shared helper, so the heredoc lives in exactly one place (common.sh).
+# Also write google-oauth-client.json (the OAuth mint flow reads it; the runtime
+# MCP does not — it uses the per-account creds file). .env is the single source
+# of truth; the json is regenerated from it via the shared helper, so the
+# heredoc lives in exactly one place (common.sh).
 export GOOGLE_OAUTH_CLIENT_ID="$CLIENT_ID"
 export GOOGLE_OAUTH_CLIENT_SECRET="$CLIENT_SECRET"
-sync_oauth_client_json
+sync_google_oauth_client_json
 
-ok "Google OAuth client stored in $ENV_FILE and $TOKEN_DIR/oauth-client.json"
+ok "Google OAuth client stored in $ENV_FILE and $TOKEN_DIR/google-oauth-client.json"
 info "Next: add individual Google accounts with ./bootstrap/lib/add-google-account.sh <email>"
