@@ -4,7 +4,7 @@
 # Every ref in a vault repo carries personal history, so pushes to public
 # template/starter repos are blocked wholesale — no ref parsing, no topic-
 # branch exceptions. Legitimate template contributions go through
-# /push-openbrain-claude-starter, which genericizes and pushes from a
+# /push-openbrain-template, which genericizes and pushes from a
 # separate template clone, never from the vault.
 #
 # Protected URL patterns come from .openbrain/protected-remotes (one shell
@@ -42,7 +42,7 @@ for pat in "${patterns[@]}"; do
     $pat)
       echo "pre-push BLOCKED: '$url' matches protected pattern '$pat'." >&2
       echo "Vault refs carry personal history; this remote must not receive them." >&2
-      echo "Template contributions: use /push-openbrain-claude-starter (pushes from" >&2
+      echo "Template contributions: use /push-openbrain-template (pushes from" >&2
       echo "the template clone, not the vault). Adjust patterns in" >&2
       echo ".openbrain/protected-remotes. Deliberate override: git push --no-verify." >&2
       exit 1
