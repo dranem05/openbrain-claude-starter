@@ -132,6 +132,7 @@ When a template in `+ Extras/Templates/` gains or removes a required frontmatter
 ## 10. Maintenance automation
 
 - **Pre-commit hook** (`.openbrain/pre-commit.sh`) — frontmatter + broken-link linter, warn-only. Linked by setup.sh into `.git/hooks/pre-commit`.
+- **Pre-push guardrail** (`.openbrain/pre-push.sh`) — blocks pushes from the vault to protected remote URLs (default: anything matching `*openbrain-claude-starter*`), since every vault ref carries personal history. Patterns configurable via `.openbrain/protected-remotes`. Linked by setup.sh into `.git/hooks/pre-push` and re-linked (self-healing) by on-start.sh.
 - **Auto git sync hooks** (opt-in, configured during setup):
   - **SessionStart hook** (`.openbrain/on-start.sh`) — `git pull --rebase` (fail-soft; never blocks).
   - **Stop hook** (`.openbrain/on-stop.sh`) — regenerates Home.md MOC index, then smart-commits all changes and pushes (skip-if-clean, pull-rebase first, conflict → inbox note). To keep commits local-only, prepend `OPENBRAIN_AUTOPUSH=0` to the hook's command in `.claude/settings.json` (e.g. `"command": "OPENBRAIN_AUTOPUSH=0 /path/to/.openbrain/on-stop.sh"`) — useful when `origin` is a repo that must not receive vault content, such as a public template fork.
@@ -257,8 +258,8 @@ Skills live in `.claude/skills/<name>/SKILL.md` (vault-local, portable with the 
 | `/sync-places` | Discovery pass across Google Calendar — finds physical places not yet captured in `+ Atlas/Places/`, stages candidates in `+ Inbox/place-candidates/`. Facet-aware: surfaces when an existing Org should also get a Place note. |
 | `/weekly-review` | Monday synthesis → `+ Atlas/Weekly Reviews/<ISO-week>.md`. |
 | `/asana` | Quick view of tasks due in the next 7 days across configured workspaces, with interactive check-off. |
-| `/pull-openbrain-template` | Pull latest changes from the upstream starter, diff against this vault's infrastructure, and interactively apply each change. |
-| `/push-openbrain-template` | Genericize vault improvements and open a PR against the upstream starter — strips personal data, diffs, and creates the GitHub PR after review. |
+| `/pull-openbrain-claude-starter` | Pull latest changes from the upstream starter, diff against this vault's infrastructure, and interactively apply each change. |
+| `/push-openbrain-claude-starter` | Genericize vault improvements and open a PR against the upstream starter — strips personal data, diffs, and creates the GitHub PR after review. |
 
 Skills are markdown procedures only — they describe which MCP tools to call and which files to read/write. They do not execute code; Claude reads the SKILL.md and performs the steps.
 
