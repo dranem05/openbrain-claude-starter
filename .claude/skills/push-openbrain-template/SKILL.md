@@ -71,6 +71,12 @@ Build a working list with three categories:
 
 Filter the list to in-scope paths per the table above. Drop anything that matches the out-of-scope rules.
 
+**Then apply the ignore manifest.** If `$VAULT/.openbrain/template-ignore` exists, drop every candidate whose vault-root-relative path matches one of its entries (one path or glob per line; `#` comments and blank lines skipped — see the file's header). These are known intentional divergences (keepers) that must never be pushed. So the skip is never silent, report one line in the final summary:
+
+> `template-ignore: N path(s) skipped (path1, path2, …)`
+
+with N=0 and no list when nothing matched. If a specific path entry (not a glob) matched no candidate and that file no longer exists in either the vault or the template, note it as stale — the divergence it covered is gone. Glob entries and currently-identical files are not stale; they are dormant and stay silent.
+
 ### 3. Per-file analysis
 
 For each candidate, read both versions side-by-side. Classify each hunk in the diff:

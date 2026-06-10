@@ -47,11 +47,20 @@ VAULT="$(pwd)"
 TEMPLATE="${OPENBRAIN_TEMPLATE_DIR:-$HOME/openbrain-claude-starter}"
 ```
 
-If the template directory exists, pull the latest changes; otherwise clone it:
+If the template directory exists, sync it; otherwise clone it. **Branch-aware:** if the clone is already checked out on a non-`main` branch (e.g. a staging or integration branch prepared for this pull), keep that checkout and skip the pull — the user put it there deliberately. Announce which ref is being diffed and name it again in the final report.
 
 ```bash
-if [ -d "$TEMPLATE/.git" ]; then
-  cd "$TEMPLATE" && git checkout main && git pull --rebase --autostash
+if [ -e "$TEMPLATE/.git" ]; then
+  (
+    cd "$TEMPLATE" && {
+      BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+      if [ "$BRANCH" = "main" ] || [ -z "$BRANCH" ]; then
+        git checkout main && git pull --rebase --autostash
+      else
+        echo "template clone is on '$BRANCH' — diffing that tree as-is (no checkout/pull)"
+      fi
+    }
+  )
 else
   git clone git@github.com:davidianstyle/openbrain-claude-starter.git "$TEMPLATE"
 fi
@@ -75,6 +84,12 @@ Build a working list with three categories:
 - **Differing** files (exist in both, different content) — candidates for **update**
 
 Filter to in-scope paths. Drop anything matching out-of-scope rules.
+
+**Then apply the ignore manifest.** If `$VAULT/.openbrain/template-ignore` exists, drop every candidate whose vault-root-relative path matches one of its entries (one path or glob per line; `#` comments and blank lines skipped — see the file's header). These are known intentional divergences (keepers): the vault's version stays, whatever the template does. So the skip is never silent, report one line in the final summary:
+
+> `template-ignore: N path(s) skipped (path1, path2, …)`
+
+with N=0 and no list when nothing matched. If a specific path entry (not a glob) matched no candidate and that file no longer exists in either the vault or the template, note it as stale — the divergence it covered is gone. Glob entries and currently-identical files are not stale; they are dormant and stay silent.
 
 ### 3. Per-file analysis
 
