@@ -2,7 +2,7 @@
 
 The interface the outbound sync procedure is built against. **This is the canonical copy.** `+ ` content roots never leave a vault, so a personal reference note pointing at this file stays a pointer — never a second copy of the text itself, which is exactly how a prior copy drifted within a day of existing.
 
-> **Status:** the scanner and this contract are live. Callers: `/push-openbrain-template` (step 0 `--selftest`, step 4 scan of everything that leaves) and `/pull-openbrain-template` (DP2 scan of incoming content). Statements about what a gate "must" do describe current behaviour.
+> **Status:** the scanner and this contract are live. Callers: `/push-openbrain-template` (step 0 `--selftest`, step 4 scan of everything that leaves). Statements about what a gate "must" do describe current behaviour.
 
 ## Invocation
 
@@ -120,12 +120,16 @@ No run keeps a list of what was accepted, and no hit is waved through because it
 - **It has already happened here.** The deleted knobs above (`--entities`, `--min-confidence`) were each a remembered exemption that went silently blind.
 - **Noise is handled by a reader, never by memory.** The declared fakes are the one fixed list, and they change only by PR.
 
+### Inbound: pull does not scan
+
+`/pull-openbrain-template` runs no NER or pattern scan on incoming content: it is public before it lands, so a scan could only report a leak that has already happened, and what leaves the vault is gated by `/push-openbrain-template`. The pull-side scan was there for symmetry with push, not for a risk it reduced.
+
 ## The `pii-patterns` list
 
 The deterministic half beside NER: each machine's own identifiers (account handles, a real name, a vault path fragment) that must never leave in infra files. A narrow backstop for what genericizing misses, not a complete PII list; content folders are protected by never being pushed.
 
 - **Where:** `.openbrain/local/pii-patterns` in the template clone (mode 600), the copy the scanners read. Create it by hand for now; nothing seeds it yet. It is per machine: never commit it and never share it.
-- **Plain entry** — one string per line, matched as a case-insensitive substring — Unicode NFC normalization and casefolding of both sides (`café` matches `CAFÉ`; an NFD-written entry matches NFC text) — `.openbrain/lib/template-scope.sh`'s `pii_match`, shared by the outbound scan and the incoming one. Right for handles: one entry catches the email, the MCP slug and the routing tag.
+- **Plain entry** — one string per line, matched as a case-insensitive substring — Unicode NFC normalization and casefolding of both sides (`café` matches `CAFÉ`; an NFD-written entry matches NFC text) — `.openbrain/lib/template-scope.sh`'s `pii_match`, used by the outbound scan. Right for handles: one entry catches the email, the MCP slug and the routing tag.
 - **`word:` entry** — `word:<string>`, matched as a whole word. **Use `word:` for short entries**: a short name as a plain substring blocks every innocent word that contains it. Here `_` is part of a word; in the flag pass's flagged-text rule (push step 5b) it is not — there a word is letters, digits and combining marks, split at camelCase steps (`getACMEToken` → get, ACME, Token) and after a source escape (`\u00a0Name` → Name; never decoded; `\\` is one escape — raw strings, regexes, URL `%XX` and ANSI sequences are accepted limits), so a fragment of a mixed-case word (a surname inside a brand-like token) passes that check; the view shows each flag with the context of its line.
 - `#` starts a comment; blank lines are ignored. Entries only ever add blocks; nothing here exempts a string.
 
