@@ -362,6 +362,81 @@ shred_findings() {   # the sensitive artefacts, never the operator's drafts. fin
     -o -name '*.hits' -o -name '*.map' -o -name 'hits.idx' -o -name 'ner.txt' -o -name 'patterns.txt' -o -name 'local-words.txt' -o -name 'deps.*' -o -name 'deps-*' \) -exec rm -f {} +
 }
 stop() { echo "STOP: CANNOT-CHECK — $*"; shred_findings; exit 1; }
+# warm scanner (bootstrap/PII-SCAN-CONTRACT.md, "Warm server"): one `pii-scan --serve` child for this block, fed one file
+# per request. Only rc 0/1 with a non-empty .json is taken from it; rc 2 reruns that file cold; any protocol fault stops
+# the server FIRST, then reruns cold, and the rest of the block scans cold.
+SRV_READY_LIMIT=30; SRV_REPLY_LIMIT=30   # seconds; constants, not knobs. A warm file takes ~0.3 s, a 250K file a few seconds; both stay well inside a typical command timeout
+srv=""; srv_pid=""; srv_seq=0; srv_up=0; srv_line=""   # srv_up: 0 = READY not yet read, 1 = in use, 2 = retired/never started
+srv_start() {
+  srv="$(mktemp -d "$SCAN_DIR/srv.XXXXXX")" && mkfifo -m 600 "$srv/req" "$srv/resp" || { srv_up=2; echo "warm scanner: could not create its FIFOs — every file scans cold"; return 0; }
+  pii-scan --serve "$srv/req" "$srv/resp" "$$" </dev/null >"$srv/log" 2>&1 &   # $$: the server watches this shell and exits when it is gone
+  srv_pid=$!
+  exec 4<>"$srv/req" 5<>"$srv/resp" || srv_retire "could not open its FIFOs"   # after the fork, so the server never holds them; read-write, so neither the open nor a write to a dead server can block or SIGPIPE
+}
+srv_stop() {   # idempotent; returns only once the server has exited, so it can never write a file cold is writing
+  local n=0
+  if [ -n "$srv_pid" ]; then
+    exec 4>&- 5>&-                     # EOF on req: a healthy server exits by itself
+    while [ "$n" -lt 20 ] && kill -0 "$srv_pid" 2>/dev/null; do sleep 0.1; n=$((n+1)); done
+    kill "$srv_pid" 2>/dev/null; n=0
+    while [ "$n" -lt 20 ] && kill -0 "$srv_pid" 2>/dev/null; do sleep 0.1; n=$((n+1)); done
+    kill -9 "$srv_pid" 2>/dev/null; wait "$srv_pid" 2>/dev/null; srv_pid=""
+  fi
+  [ -z "$srv" ] || rm -rf "$srv"; srv=""; srv_up=2
+}
+srv_retire() {
+  echo "warm scanner retired ($1) — this file and the rest of the block scan cold"
+  [ ! -s "$srv/log" ] || sed -n '1,5s/^/  server: /p' "$srv/log"
+  srv_stop
+}
+srv_read() {   # srv_read <seconds> → srv_line = one whole reply line; nonzero = none by the deadline, or the server is gone
+  local LC_ALL=C   # bytes, not characters: in a UTF-8 locale zsh's `read -k 1` waits for the rest of a multibyte char, and -t times only its first byte
+  local deadline=$((SECONDS+$1)) c rrc
+  srv_line=""
+  while [ "$SECONDS" -lt "$deadline" ]; do   # a wall-clock deadline, not a count of turns: a trickle of bytes cannot extend it
+    c=""   # one char per read: zsh's `read -t` times only the FIRST byte of a line, then blocks for the newline
+    if [ -n "${ZSH_VERSION:-}" ]; then read -r -t 1 -k 1 -u 5 c; rrc=$?; else IFS= read -r -t 1 -n 1 c <&5; rrc=$?; fi
+    if [ "$rrc" -eq 0 ]; then
+      case "$c" in ''|$'\n') return 0 ;; esac   # the newline: bash reads it as '', zsh as itself
+      srv_line="$srv_line$c"; [ "${#srv_line}" -lt 512 ] || return 1
+    else
+      kill -0 "$srv_pid" 2>/dev/null || return 1   # any nonzero is "nothing yet" (bash 3.2 returns 1 on timeout, newer bash >128)
+    fi
+  done
+  return 1
+}
+scan_ner() {   # scan_ner <textfile> <out-prefix> → the scan's rc, with <out>.json/.err written
+  local text="$1" o="$2" why="" src=""
+  rm -f "$o.json" "$o.err"             # a stale file can never pass the checks below
+  if [ "$srv_up" = 0 ]; then
+    if ! srv_read "$SRV_READY_LIMIT"; then srv_retire "no READY within ${SRV_READY_LIMIT}s, or it exited"
+    elif [ "$srv_line" = "READY"$'\t'"$srv_pid" ]; then srv_up=1   # its own pid: a launcher layer that did not exec would leave $! (what srv_stop waits on) a different process
+    else srv_retire "malformed READY line, or a pid other than $srv_pid"; fi
+  fi
+  case "$text$o" in *$'\t'*|*$'\r'*|*$'\n'*) src=cold ;; esac   # a path the protocol cannot carry goes cold, alone
+  if [ "$srv_up" = 1 ] && [ -z "$src" ]; then
+    srv_seq=$((srv_seq+1))
+    if ! printf '%s\t%s\t%s\n' "$srv_seq" "$text" "$o" >&4; then why="request write failed"
+    elif ! srv_read "$SRV_REPLY_LIMIT"; then why="no reply within ${SRV_REPLY_LIMIT}s, or it exited"
+    else
+      case "$srv_line" in *$'\t'*) ;; *) why="malformed reply" ;; esac
+      if [ -z "$why" ] && [ "${srv_line%%$'\t'*}" != "$srv_seq" ]; then why="reply out of sync (seq)"; fi
+      if [ -z "$why" ]; then
+        case "${srv_line#*$'\t'}" in
+          0|1) if [ -s "$o.json" ]; then return "${srv_line#*$'\t'}"; fi; why="rc ${srv_line#*$'\t'} with an empty .json" ;;
+          2) ;;                        # cold is the authority on rc 2; the server stays in use
+          *) why="malformed reply" ;;
+        esac
+      fi
+    fi
+    if [ -n "$why" ]; then srv_retire "$why"; fi   # BEFORE the cold rerun below
+    rm -f "$o.json" "$o.err"
+  fi
+  pii-scan --mode gate --format json "$text" > "$o.json" 2> "$o.err" 4>&- 5>&-
+}
+trap 'srv_stop' EXIT                   # top level only: a zsh trap set inside a function fires when that function returns
+trap 'exit 1' INT TERM HUP             # a signal becomes an exit, so the EXIT trap runs in bash and zsh alike
+srv_start
 has_nul() { [ "$(LC_ALL=C tr -d '\000' < "$1" | wc -c)" -ne "$(wc -c < "$1")" ]; }   # FIRST, before any grep reads the file: a grep that skips binary input (the session's is a function, ugrep -I) reads a NUL-bearing file as empty
 has_text() { LC_ALL=C command grep -q '[^[:space:]]' "$1"; }   # -s alone passes whitespace-only files, which the scanner (rightly) refuses
 LIB="${VAULT:?}/.openbrain/lib/template-scope.sh"
@@ -388,7 +463,7 @@ scan() {                       # scan <label> <textfile> [<linemap>]  → record
   local label="$1" text="$2" map="${3:-}" out rc=0 prc=0 lrc=0
   if has_nul "$text"; then stop "binary content (NUL bytes) in $label — no text scanner can see into it; drop it from the change"; fi
   out="$SCAN_DIR/$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')-$(printf '%s' "$label" | cksum | cut -d' ' -f1)"   # hash keeps a/b.md and a_b.md apart
-  pii-scan --mode gate --format json "$text" > "$out.json" 2> "$out.err" || rc=$?
+  scan_ner "$text" "$out" || rc=$?
   case "$rc" in
     0) ;;
     1) printf '%s\tNER\t%s.json\n' "$label" "$out" >> "$SCAN_DIR/findings.idx" ;;
@@ -421,9 +496,12 @@ def urlclass(u):
             else "opaque id in path" if any(re.fullmatch(r'[A-Za-z0-9]{16,}', t)
                                                for seg in path.split('/') for t in re.split(r'[-_.]', seg))
             else None)
+res = json.load(open(out + ".json", encoding="utf-8"))   # the cross-check below holds for every answer, warm or cold
+if res.get("source") != text: sys.exit("locator: the scanner's JSON names %r, not the text it was given" % res.get("source"))
+if (rc == "1") != bool(res.get("findings")): sys.exit("locator: exit %s disagrees with the %d finding(s) in the JSON" % (rc, len(res.get("findings") or [])))
 with open(out + ".urls", "w") as U, open(out + ".hits", "w") as H:
     if rc == "1":
-        for f in json.load(open(out + ".json"))["findings"]:
+        for f in res["findings"]:
             row = {"kind": "NER", "type": f["entity_type"], "text": f["text"], "score": f.get("score"),
                    "file": where, "line": fline(bisect.bisect_left(nl, f["start"]) + 1),
                    "before": src[f["start"] - 1] if f["start"] > 0 else "", "after": src[f["end"]] if f["end"] < len(src) else ""}
@@ -543,6 +621,7 @@ while IFS=$'\t' read -r st rel newrel <&3; do   # not `status`/`path`: read-only
   esac
 done 3< "$SCAN_DIR/outgoing.tsv"
 for t in commit-msg pr-title pr-body; do has_text "$SCAN_DIR/$t.txt" 2>/dev/null || stop "$t.txt missing or empty — draft it before scanning"; scan "$t" "$SCAN_DIR/$t.txt"; done
+srv_stop; trap - EXIT INT TERM HUP   # the last scan is done: the server dies with the block, even in a longer-lived shell
 # no routing: every NER hit goes to the agent (step 5b) as one id'd item per distinct (type, text); every pattern hit goes
 # to the human view (step 5c), located. Nothing is counted away and nothing is remembered across runs — why:
 # bootstrap/PII-SCAN-CONTRACT.md, "Why nothing is remembered".
@@ -584,7 +663,7 @@ echo "NER list (the agent's): $SCAN_DIR/ner.txt · pattern hits (the view's): $S
 
 Rules for what happens next:
 
-- **Exit `2`, `126`, `127` or anything but `0`/`1` from the scanner is CANNOT-CHECK** — the block above stops and deletes the scratch dir. Do not re-run with a pattern-only "fallback"; fix the scanner (`bootstrap/lib/install-pii-scan.sh`) and start over. A binary or non-UTF-8 file in the change is CANNOT-CHECK too: drop that file from the change.
+- **Exit `2`, `126`, `127` or anything but `0`/`1` from the scanner is CANNOT-CHECK** — the block above stops and deletes the scratch dir. (A warm-server answer counts only when it is `0`/`1` with a non-empty `.json`; anything else reruns as an ordinary cold call, whose exit code is the one judged here — `bootstrap/PII-SCAN-CONTRACT.md`, "Warm server". A `warm scanner retired (…)` line means the rest of the run went cold; it is not a failure. The scan step can run several minutes — ~2–3 s per scanned text when cold — so run it with a long command timeout (the tool's maximum; in Claude Code, the Bash tool's `timeout` parameter). A killed block records nothing.) Do not re-run with a pattern-only "fallback"; fix the scanner (`bootstrap/lib/install-pii-scan.sh`) and start over. A binary or non-UTF-8 file in the change is CANNOT-CHECK too: drop that file from the change.
 - **Read the findings only from the two lists the block writes** — `$SCAN_DIR/ner.txt` (the agent's) and `$SCAN_DIR/patterns.txt` (the view's) — and the per-label `*.json`, `*.urls`, `*.pat` and `*.hits` behind them with `Read` when a decision needs the detail; nothing else there (`local-patterns.txt` and `local-words.txt` are the machine's own pattern list, not findings). No wholesale `cat` of a JSON file into the conversation. Never paste a finding, a JSON excerpt or a matched line into a PR comment, a commit message, the report, or anything that leaves this machine. The `coverage.txt` lines — labels, byte counts, exit codes, hit counts — are the only scan output that may be quoted.
 - **No question is asked here, and nothing is routed.** The block lists **every** hit with its `file:line` (it stops if the count listed differs from the count found), and nothing carries over to the next run:
   - **NER hits → the agent.** `ner.txt` holds one item per distinct `(type, text)`, `n<k> | <TYPE> | <file>:<line>, … | «<text>»`, every place it occurs listed (files, `commit-msg`, `pr-title`, `pr-body`, `branch-name`, `path-list`). Nothing is counted away first: the agent answers `ok` or `flag` for every id (step 5b, checked), applying the declared-fakes rule its brief carries. NER hits are not shown to the human.
