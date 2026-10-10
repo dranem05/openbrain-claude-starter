@@ -32,7 +32,7 @@ Three things this skill will not do, ever: walk the filesystem to find candidate
 
 Also never read: `~/.config/openbrain/.env`, `~/.claude/projects/.../memory/`.
 
-**The default scope is a roots allowlist, not a deny-everything-else list.** `all` (and every scope hint below `bootstrap`) enumerates only `PORTABLE_ROOTS` — the paths `.claude/skills/`, `.openbrain/`, `+ Extras/Templates/`, `CLAUDE.md`, `README.md`, and the four per-machine-safe `.obsidian/*.json` files — as defined once in `.openbrain/lib/template-scope.sh` (`in_roots()`) and shared by every sync skill (push, pull, and any skill layered on these blocks). A path outside the roots is never a candidate under `all`; it takes an explicit hint that names it (`bootstrap`, or the path itself) to reach it. The hard-deny table above still applies on top of the roots — it exists for paths that could otherwise slip into a root (`.openbrain/local/` is under `.openbrain/`, `+ Extras/Templates/` is carved back out of the wider `+ ` deny) — not to bound the *rest* of the repo, which the roots already exclude.
+**The default scope is a roots allowlist, not a deny-everything-else list.** `all` (and every scope hint below `bootstrap`) enumerates only `PORTABLE_ROOTS` — the paths `.claude/skills/`, `.openbrain/`, `+ Extras/Templates/`, `CLAUDE.md`, `README.md`, and the four per-machine-safe `.obsidian/*.json` files — as defined once in `.openbrain/lib/template-scope.sh` (`in_roots()`) and shared by every sync skill (push, pull, and any skill layered on these blocks). The hard-deny table above still applies on top of the roots (`.openbrain/local/` is under `.openbrain/`; `+ Extras/Templates/` is carved back out of the wider `+ ` deny).
 
 | Vault path | Template path | Notes |
 |---|---|---|
@@ -43,9 +43,9 @@ Also never read: `~/.config/openbrain/.env`, `~/.claude/projects/.../memory/`.
 | `CLAUDE.md` | same | Most delicate — see §"CLAUDE.md handling" below |
 | `.obsidian/app.json`, `core-plugins.json`, `appearance.json`, `graph.json` | same | Only port if a setting is universally useful. Per-machine files are gitignored and never enumerate. |
 | `README.md` | same | Only port if there's a real improvement |
-| `bootstrap/` | same | Has its own architecture. It **is** one of `PORTABLE_ROOTS` (David's own pull-skill text roots it — "include in diff, but flag for careful review"), but push's own upstream text says the opposite ("only update if explicitly asked"), so `template-scope.sh`'s `PUSH_ALL_OMITS` subtracts it from this skill's `all` — the `bootstrap` scope hint, or a path under it, still reaches it on request. This is a real asymmetry in David's own two files, not a mismatch to fix here |
+| `bootstrap/` | same | Has its own architecture. Only update if explicitly asked: it is one of `PORTABLE_ROOTS`, but `template-scope.sh`'s `PUSH_ALL_OMITS` subtracts it from this skill's `all` — the `bootstrap` scope hint, or a path under it, reaches it (why pull differs: `bootstrap/PII-SCAN-CONTRACT.md`, "Design notes") |
 
-`Dashboard.md` and `.gitignore`, which an earlier version of this table listed as portable, are no longer roots — the roots list is now the shared, sourced one in `template-scope.sh`, and neither of those two ships in it. **These paths are not portable at all: no scope hint, including an explicit path, reaches outside `PORTABLE_ROOTS`** — the roots are the whole scope, not a default that a specific-enough hint can escape. A hint that names a path outside the roots is refused at step 1 (`in_roots` empties it, and the block STOPs naming the hint rather than silently enumerating nothing). This is a different mechanism from `.openbrain/template-ignore`, which declines specific paths *inside* the roots that the destination already has — **deliberate divergence only** (a vault's personalized keepers, home despite being upstream); a vault-only file needs no entry, because an unnamed new file is never offered: matching paths never become candidates here, and never arrive through `/pull-openbrain-template`; the enumerate block prints its count and list every run. A real improvement to `Dashboard.md` or `.gitignore` would need `PORTABLE_ROOTS` itself extended, not a hint. Anything git tracks outside the roots is never enumerated, so it never becomes a candidate; the hard-deny table and the scanner decide the rest, then you do. Anything containing real secrets (PATs, OAuth client IDs, refresh tokens, `xoxp-*` tokens) is dropped at step 3 or caught at step 4.
+**No scope hint, including an explicit path, reaches outside `PORTABLE_ROOTS`**: step 1 STOPs naming such a hint. This is a different mechanism from `.openbrain/template-ignore`, which declines specific paths *inside* the roots that the destination already has — **deliberate divergence only** (a vault's personalized keepers, home despite being upstream); a vault-only file needs no entry, because an unnamed new file is never offered: matching paths never become candidates here, and never arrive through `/pull-openbrain-template`; the enumerate block prints its count and list every run. Widening the scope means extending `PORTABLE_ROOTS` itself, never a hint. Anything containing real secrets (PATs, OAuth client IDs, refresh tokens, `xoxp-*` tokens) is dropped at step 3 or caught at step 4.
 
 ## Procedure
 
@@ -61,7 +61,7 @@ DEST_REF=refs/remotes/upstream/main   # the destination: what "already there" me
 DEP_UNION=   # push is strict: the dependency check resolves against the staged tree only (share sets `staging`) — re-export it with DEST_REF
 ```
 
-**a. Clone clean, on `main`, fetched.** The destination ref is fetched here, every run: `DEST_REF` is what "already there" means for new files, and a stale one reads a file upstream has since deleted as present, so it would skip the new-file confirm. The remote is `upstream`, or `origin` when the clone has none (a clone of the template itself), as in the pull skill's preflight.
+**a. Clone clean, on `main`, fetched.** The destination ref is fetched here, every run: `DEST_REF` is what "already there" means for new files. The remote is `upstream`, or `origin` when the clone has none (a clone of the template itself), as in the pull skill's preflight.
 
 ```bash
 # --- push-skill: clone ---
@@ -77,7 +77,7 @@ echo "DEST_REF=$DEST_REF ($UPR fetched just now, at $(git -C "$TEMPLATE" rev-par
 
 Re-export the `DEST_REF` it printed in every later block.
 
-**b. No vault configured as a remote of the clone.** A vault remote on the bench that pushes to public repos is a vault → clone → public leak path. The guard refuses on a local-path remote or a `.openbrain/vault-remotes` pattern match (the vault's pattern file is passed in as `VAULT_REMOTES_FILE`, unioned with the clone's if it has one), and refuses when it cannot determine the repo, is not run from its root, has zero remotes, or sees `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR` set. Its OK line states coverage: remote URL rows checked, patterns and pattern files applied. The vault's pattern file is passed only when it exists; a vault without one is told, in one line, that ssh/https-reached vaults are then undetectable. It is the **vault-resident** copy (`$VAULT/.openbrain/lib/`, vault-is-king) run with the clone as its working directory: the clone's `main` does not carry the script until this PR merges, so running the clone's copy would STOP `127` on every machine. The file still ships in the PR so vaults created from the template carry it too.
+**b. No vault configured as a remote of the clone.** The guard refuses on a local-path remote or a `.openbrain/vault-remotes` pattern match (the vault's pattern file is passed in as `VAULT_REMOTES_FILE`, unioned with the clone's if it has one), and refuses when it cannot determine the repo, is not run from its root, has zero remotes, or sees `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR` set. Its OK line states coverage: remote URL rows checked, patterns and pattern files applied. The vault's pattern file is passed only when it exists; a vault without one is told, in one line, that ssh/https-reached vaults are then undetectable. It is the **vault-resident** copy (`$VAULT/.openbrain/lib/`) run with the clone as its working directory, never the clone's copy (why: `bootstrap/PII-SCAN-CONTRACT.md`, "Design notes").
 
 ```bash
 # --- push-skill: guard ---
@@ -95,7 +95,7 @@ case "$rc" in
 esac
 ```
 
-Three outcomes, never two: `0` checked and clean **and** the guard's own `OK — N remote URL row(s) checked` line is present (a zero-byte or truncated script also exits 0 — the exit code alone is not proof the check ran), `1` blocked, anything else (`2` cannot determine the repo, not at its root, zero remotes, cannot enumerate or parse its remotes, or a named pattern file is unreadable; `126` script unreadable or not a file; `127` script absent from the vault) is CANNOT-CHECK. A missing checker is never a passing one. The block also refuses when `VAULT` is not absolute or resolves to the clone — every block re-derives `VAULT="$(pwd)"`, so the shell must never be left inside the clone (0a's `cd` runs in a subshell for that reason).
+Three outcomes, never two: `0` checked and clean **and** the guard's own `OK — N remote URL row(s) checked` line is present, `1` blocked, anything else (`2` cannot determine the repo, not at its root, zero remotes, cannot enumerate or parse its remotes, or a named pattern file is unreadable; `126` script unreadable or not a file; `127` script absent from the vault) is CANNOT-CHECK. The block also refuses when `VAULT` is not absolute or resolves to the clone — every block re-derives `VAULT="$(pwd)"`, so the shell must never be left inside the clone.
 
 **c. The PII scanner is present and proves it can see.** `pii-scan --selftest` runs the exact configured pipeline against a canary name + email. Exit codes are the contract (`bootstrap/PII-SCAN-CONTRACT.md`): `0` works, anything else is **CANNOT-CHECK** — including `2` (no venv, wrong model, blind configuration) and `126`/`127` (not installed).
 
@@ -106,7 +106,7 @@ rc=0; pii-scan --selftest || rc=$?
 
 There is no patterns-only fallback. A machine that cannot run the scanner cannot push from this skill.
 
-**d. A private scratch dir for scan output.** Findings JSON quotes every detected identifier verbatim — it is as sensitive as what it describes. It lives here and nowhere else, and is deleted at the end of step 6 (or on any abort):
+**d. A private scratch dir for scan output.** Findings JSON quotes every detected identifier verbatim (contract, "Handling the output"). It lives here and nowhere else, and is deleted at the end of step 6 (or on any abort):
 
 ```bash
 find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'push-scan.*' -user "$(id -un)" -exec rm -rf {} +   # a previous aborted run's scratch, if any
@@ -117,9 +117,9 @@ Shell state does not survive between tool calls. Every later block starts by re-
 
 ### 1. Enumerate candidates from git, not the filesystem
 
-Ask each repo what it tracks or would track (`-c` cached, `-o` untracked-but-not-ignored). Gitignored paths cannot appear, deletions show, and no directory walker is ever handed a tree.
+Ask each repo what it tracks or would track (`-c` cached, `-o` untracked-but-not-ignored).
 
-The block sources the shared scope library and maps the scope hint (`HINT`, the `$1` the user typed) to a git pathspec **within `PORTABLE_ROOTS`**; `all` means the roots minus `PUSH_ALL_OMITS` (`bootstrap/` — push's own narrower rule; see the Scope table) — `git ls-files` is never run over the whole tree, and every scope, including a bare path hint, is filtered through `in_roots` afterward. There is no separate knob to turn that filtering off: `bootstrap/` reaches this skill by naming it (or a path under it) as the hint, and it's still in `PORTABLE_ROOTS`, so `in_roots` passes it through like anything else.
+The block sources the shared scope library and maps the scope hint (`HINT`, the `$1` the user typed) to a git pathspec **within `PORTABLE_ROOTS`**; `all` means the roots minus `PUSH_ALL_OMITS` (`bootstrap/` — push's own narrower rule; see the Scope table) — `git ls-files` is never run over the whole tree, and every scope, including a bare path hint, is filtered through `in_roots` afterward. No knob turns that filtering off: `bootstrap/` is reached by naming it (or a path under it) as the hint.
 
 ```bash
 # --- push-skill: enumerate ---
@@ -196,7 +196,7 @@ printf 'enumerated (hint=%s): vault %s paths (%s after roots+deny), template %s 
   "$(n "$SCAN_DIR/vault-only.lst")" "$(n "$SCAN_DIR/template-only.lst")" "$(n "$SCAN_DIR/differing.lst")"
 ```
 
-Always print that coverage line. The block stops by itself when either `*.ok` list is empty (wrong `VAULT`/`TEMPLATE`, bad pathspec, broken clone — not a clean result; for a single-path hint, when both are — a new or deleted file is empty on one side by nature) and when a path needs git quoting (a tab, quote or backslash in a filename would otherwise escape both the deny list and the scan). If `vault-only` and `differing` are both empty, stop too and say "nothing in scope differs" with the counts — never the word *clean*.
+Always print that coverage line. The block stops by itself when either `*.ok` list is empty (wrong `VAULT`/`TEMPLATE`, bad pathspec, broken clone — not a clean result; for a single-path hint, when both are — a new or deleted file is empty on one side by nature) and when a path needs git quoting (a tab, quote or backslash in a filename). If `vault-only` and `differing` are both empty, stop too and say "nothing in scope differs" with the counts — never the word *clean*.
 
 **New files go out only when named.** A path in the vault but absent at `DEST_REF` (upstream `main`) is dropped from both lists unless its exact path is in `named.lst`; the block prints `N files not at <dest> not considered; name a path to add` every run. Named ones are echoed back — "adding these N new files to <dest>: … OK?" — for **one explicit confirm**; only on a yes, copy `add.lst` to `add.ok`. Step 4 refuses any staged file absent at the destination that is not on a confirmed list matching step 1's.
 
@@ -332,7 +332,7 @@ In `--dry-run`, do exactly the same, but on a branch named `dry-run/<change-slug
 
 ### 4. Scan everything that will leave — content, not paths
 
-Two scanners, both mandatory: **`pii-scan`** (NER — names, emails, phones, locations, URLs; `gate` mode; no tuning flags exist and none are wanted, every earlier knob produced silent blindness) and **the pattern list** (deterministic — tokens, OAuth client IDs, Asana gids, 40-hex, home paths, plus the machine's own `.openbrain/local/pii-patterns` entries when that file exists in the clone). Their hits go to different readers: every NER hit to the agent (step 5b), every pattern hit to the human view (step 5c). What gets scanned:
+Two scanners, both mandatory: **`pii-scan`** (NER — names, emails, phones, locations, URLs; `gate` mode; no tuning flags — contract, "There are no knobs that narrow a scan") and **the pattern list** (deterministic — tokens, OAuth client IDs, Asana gids, 40-hex, home paths, plus the machine's own `.openbrain/local/pii-patterns` entries when that file exists in the clone). Their hits go to different readers: every NER hit to the agent (step 5b), every pattern hit to the human view (step 5c). What gets scanned:
 
 - the **staged blob** of every new, copied or renamed file (the index is what the commit carries; the worktree copy is not)
 - the **added lines** of every modified file (the diff hunks — what actually leaves)
@@ -341,7 +341,7 @@ Two scanners, both mandatory: **`pii-scan`** (NER — names, emails, phones, loc
 
 Not scanned, published by design: the commit **author** (`user.name`/`user.email` of the clone). A PR carries its author; if that identity should differ from your vault's, set it in the clone (`git config user.name …`) before committing.
 
-`BASE` must be exported explicitly — `main` for a plain change, the parent PR branch for a stacked one; the block refuses to guess, because a scan against the wrong base attests to a span that is not the one published. The clone's `.openbrain/local/pii-patterns`, when it exists, is one entry per line, matched after Unicode NFC normalization and casefolding on both sides (so `café` matches `CAFÉ`, and an NFD-written entry matches NFC text): a plain entry as a substring, a `word:` entry as a whole word (letters, digits and `_` delimit it, so `word:rail` never fires on "trailing"); `#` comments and blank lines ignored; the coverage header states how many entries were live, or `absent`.
+`BASE` must be exported explicitly — `main` for a plain change, the parent PR branch for a stacked one; the block refuses to guess. The clone's `.openbrain/local/pii-patterns`, when it exists, is matched as the contract's "The `pii-patterns` list" says (NFC + casefold on both sides; a plain entry as a substring, a `word:` entry as a whole word); the coverage header states how many entries were live, or `absent`.
 
 ```bash
 # --- push-skill: scan ---
@@ -352,9 +352,8 @@ umask 077; cd "${TEMPLATE:?}" || exit 1
 PATTERNS='xox[pbea]-|[0-9]/[0-9]{10,}[:/]|apps\.googleusercontent\.com|ASANA_PAT_[A-Z]+=.|[0-9a-f]{40}|/Users/[^/ ]+|[0-9]{16}'
 # Hosts whose plain documentation links may be dispositioned as ONE grouped prompt per file. Literal, edited by the
 # repo owner only. A URL is groupable only if its host is exactly here AND it has no query string, no fragment and no
-# path segment holding an opaque id — split each segment on - _ . and ask if any token is >=16 chars of [A-Za-z0-9];
-# testing the whole segment instead calls en.wikipedia.org/wiki/Named-entity_recognition (24 chars) an id and
-# un-groups the very documentation links this exists to collapse. A share link, token or document id stays single.
+# path segment holding an opaque id (split on - _ . first; any token >=16 chars of [A-Za-z0-9]) — contract, "The one
+# sanctioned grouping". A share link, token or document id stays single.
 URL_GROUP_HOSTS='github.com docs.claude.com code.claude.com developer.mozilla.org en.wikipedia.org'
 : > "$SCAN_DIR/coverage.txt"; : > "$SCAN_DIR/findings.idx"; : > "$SCAN_DIR/hits.idx"; rm -f "$SCAN_DIR/local-patterns.txt" "$SCAN_DIR/local-words.txt" "$SCAN_DIR/ner.txt" "$SCAN_DIR/patterns.txt" "$SCAN_DIR/scan.ok" "$SCAN_DIR/scan-notes.txt" "$SCAN_DIR/flags.txt"   # a re-run never reads the last run's hits, nor the last flag pass's reply
 shred_findings() {   # the sensitive artefacts, never the operator's drafts. find, not globs: an unmatched glob aborts the whole rm under zsh
@@ -369,7 +368,6 @@ LIB="${VAULT:?}/.openbrain/lib/template-scope.sh"
 [ -f "$LIB" ] || stop "template-scope.sh missing at $LIB; restore it from git, or re-pull the template — it ships alongside /push-openbrain-template"
 source "$LIB"
 typeset -f deny >/dev/null 2>&1 && typeset -f in_roots >/dev/null 2>&1 && typeset -f pii_patterns >/dev/null 2>&1 && typeset -f pii_match >/dev/null 2>&1 || stop "template-scope.sh sourced but deny()/in_roots()/pii_patterns()/pii_match() did not load"   # the hard-deny list, re-applied here to what is actually staged; same function step 1 sourced. in_roots isn't used in this block, but the load check still verifies BOTH functions loaded — a lib that half-loaded is broken, not half-usable
-# the clone's own per-machine pattern list, when it has one — normalized once (BOM, CR, comments, `word:` prefix, padding)
 # the vault's pii-patterns sync, when this vault has it: regenerate the clone copy from the vault copy BEFORE it is read,
 # so a mid-session vault edit is live. Absent (a template vault) is stated, never skipped silently; rc 20 stops.
 PSYNC="$VAULT/.openbrain/lib/pii-patterns-sync.sh"
@@ -379,6 +377,7 @@ if [ -f "$PSYNC" ]; then
   case "$psrc" in 0|3) PSYNC_STATE="ok (rc $psrc)" ;; 10) PSYNC_STATE="WARN — the clone copy was NOT regenerated (it holds entries the vault copy lacks); scanned as is" ;;
     *) stop "pii-patterns sync failed (rc $psrc) — the clone copy may be stale; fix it and re-run" ;; esac
 else PSYNC_STATE="MISSING — no $PSYNC (a template vault has none); the clone copy is scanned as is"; echo "pii-patterns sync: $PSYNC_STATE"; fi
+# the clone's own per-machine pattern list, when it has one — normalized once (BOM, CR, comments, `word:` prefix, padding)
 LOCAL_N=absent
 if [ -f .openbrain/local/pii-patterns ]; then
   pii_patterns .openbrain/local/pii-patterns > "$SCAN_DIR/local-patterns.norm" || stop "could not read .openbrain/local/pii-patterns"   # the shared normalizer in template-scope.sh
@@ -585,18 +584,18 @@ echo "NER list (the agent's): $SCAN_DIR/ner.txt · pattern hits (the view's): $S
 
 Rules for what happens next:
 
-- **Exit `2`, `126`, `127` or anything but `0`/`1` from the scanner is CANNOT-CHECK** — the block above stops and deletes the scratch dir. Do not re-run with a pattern-only "fallback"; fix the scanner (`bootstrap/lib/install-pii-scan.sh`) and start over. A binary or non-UTF-8 file in the change is CANNOT-CHECK too: the block tests every text for NUL bytes before any `grep` reads it (a `grep` that skips binary input would call it empty and skip it), and the scanner refuses NUL bytes rather than scan gibberish. Drop that file from the change. Every `grep` in these blocks is `command grep`, so a shell function named `grep` (the Claude Code session defines one) never answers for it.
-- **Read the findings only from the two lists the block writes** — `$SCAN_DIR/ner.txt` (the agent's) and `$SCAN_DIR/patterns.txt` (the view's) — and the per-label `*.json`, `*.urls`, `*.pat` and `*.hits` behind them with `Read` when a decision needs the detail; nothing else there (`local-patterns.txt` and `local-words.txt` are the machine's own pattern list, not findings). No wholesale `cat` of a JSON file into the conversation. Never paste a finding, a JSON excerpt or a matched line into a PR comment, a commit message, the report, or anything that leaves this machine. The `coverage.txt` lines — labels, byte counts, exit codes, hit counts — are the only scan output that may be quoted. (The Claude Code transcript is local and already holds the vault's own content; `.claude/projects/` is hard-denied above so it never travels.)
+- **Exit `2`, `126`, `127` or anything but `0`/`1` from the scanner is CANNOT-CHECK** — the block above stops and deletes the scratch dir. Do not re-run with a pattern-only "fallback"; fix the scanner (`bootstrap/lib/install-pii-scan.sh`) and start over. A binary or non-UTF-8 file in the change is CANNOT-CHECK too: drop that file from the change.
+- **Read the findings only from the two lists the block writes** — `$SCAN_DIR/ner.txt` (the agent's) and `$SCAN_DIR/patterns.txt` (the view's) — and the per-label `*.json`, `*.urls`, `*.pat` and `*.hits` behind them with `Read` when a decision needs the detail; nothing else there (`local-patterns.txt` and `local-words.txt` are the machine's own pattern list, not findings). No wholesale `cat` of a JSON file into the conversation. Never paste a finding, a JSON excerpt or a matched line into a PR comment, a commit message, the report, or anything that leaves this machine. The `coverage.txt` lines — labels, byte counts, exit codes, hit counts — are the only scan output that may be quoted.
 - **No question is asked here, and nothing is routed.** The block lists **every** hit with its `file:line` (it stops if the count listed differs from the count found), and nothing carries over to the next run:
-  - **NER hits → the agent.** `ner.txt` holds one item per distinct `(type, text)`, `n<k> | <TYPE> | <file>:<line>, … | «<text>»`, every place it occurs listed (files, `commit-msg`, `pr-title`, `pr-body`, `branch-name`, `path-list`). Nothing is counted away first — no filename, code-shape or declared-fake class: the agent answers `ok` or `flag` for every id (step 5b, checked), applying the declared-fakes rule its brief carries. NER hits are not shown to the human.
+  - **NER hits → the agent.** `ner.txt` holds one item per distinct `(type, text)`, `n<k> | <TYPE> | <file>:<line>, … | «<text>»`, every place it occurs listed (files, `commit-msg`, `pr-title`, `pr-body`, `branch-name`, `path-list`). Nothing is counted away first: the agent answers `ok` or `flag` for every id (step 5b, checked), applying the declared-fakes rule its brief carries. NER hits are not shown to the human.
   - **Pattern hits → the human view.** `patterns.txt` holds one line per hit, `<file>:<line> | «<the matched line>»`. They are deterministic, so they go straight to the view (step 5c) beside the agent's flags; each is a decision.
-- **Never auto-block on a count and never auto-accept.** Source code is noisy: `--git` scores 0.85 as `PERSON`, the same as a real name. The agent reads past that noise; the human reads the agent's flags and the pattern hits.
+- **Never auto-block on a count and never auto-accept.** NER is noisy on source code and its scores cannot separate junk from a real name (contract, "Precision"). The agent reads past that noise; the human reads the agent's flags and the pattern hits.
 
 In `--dry-run`, this step runs in full on the `dry-run/<change-slug>` branch from step 3 and prints coverage and the `scan:` line, and the run continues to step 5, which ends it (`push-skill: dry-run-end`).
 
 ### 5. Final check — scanners, an agent flag pass, then the human
 
-This is **mandatory**. The scanners do not replace it: NER cannot tell a real colleague's first name from an example, misses handles, client names, codenames and deal amounts outright, and the pattern list only knows what someone enumerated. The agent is the primary detector; three passes, in order:
+This is **mandatory**. The scanners do not replace it: NER misses whole classes of leak outright (contract, "Outbound"), and the pattern list only knows what someone enumerated. The agent is the primary detector; three passes, in order:
 
 1. **Scanners** — step 4: NER hits listed for the agent, pattern hits listed for the human.
 2. **Agent flag pass** — a reader with no stake in the port reads every added line of the outgoing diff, the commit message and the PR title and body for personal or business context, and answers every item of two lists: the **new-vocabulary list** (its focus list: every added prose line, code token, filename-like string and path segment holding a word or name the base tree has never contained) and the **NER list** from step 4.
@@ -626,9 +625,9 @@ echo "agent brief: $SCAN_DIR/brief.txt  (fakes rule from $VAULT/$FLAG_PASS_FAKES
 
 #### 5b. Agent flag pass
 
-Spawn a **fresh subagent** (no prior context — never a fork of this session) and give it **only** the text of `$SCAN_DIR/brief.txt`, verbatim (it names the seven files the agent reads: the diff, the focus list, the NER list, the commit message, the PR title, the PR body and the branch name), plus one line naming the user's own identifiers you already know (name, employer, email domains), so it can recognise them. Give it none of the porting reasoning: it is useful because it does not know what you meant to keep. The brief is generated by 5a at every run; its declared-fakes rule is built from `bootstrap/lib/pii-fakes.txt`, never written into this skill. Where the substrate has no subagents, do the pass yourself as a separate step, reading only those seven files, and say so on the `mode:` line.
+Spawn a **fresh subagent** (no prior context — never a fork of this session) and give it **only** the text of `$SCAN_DIR/brief.txt`, verbatim (it names the seven files the agent reads: the diff, the focus list, the NER list, the commit message, the PR title, the PR body and the branch name), plus one line naming the user's own identifiers you already know (name, employer, email domains), so it can recognise them. Give it none of the porting reasoning: it is useful because it does not know what you meant to keep. The brief is generated by 5a at every run, its declared-fakes rule from `bootstrap/lib/pii-fakes.txt`. Where the substrate has no subagents, do the pass yourself as a separate step, reading only those seven files, and say so on the `mode:` line.
 
-Save its reply verbatim to `$SCAN_DIR/flags.txt`, with a first line `mode: subagent` or `mode: same-agent`, then check it. The agent counts nothing — the check computes the file and added-line totals from the diff itself — and it answers for four things: its item lines are **exactly** the ids of the focus list and of the NER list (a missing, extra or repeated id is CANNOT-CHECK: a skipped NER id is a STOP, never a pass), every other flag points at a real added `file:line` or a real line of the commit message, PR title, PR body or branch name, every flag's text is on what it cites (the focus item without its label, or its line or path; the NER item's text, unescaped; the cited line) as whole words — the rule the brief declares: at least 2 characters, one a letter or digit, no letter, digit or combining mark running on past either end (camelCase steps break: `get|ACME|Token`, `HTTP|Server`; so does a source escape ending right before it, `\u00a0|Name`, never decoded), NFC-normalised, any whitespace run as one space, otherwise verbatim, and the reply says `none found` when it flags nothing. A reply that skipped items, invented locations or said nothing is caught, not trusted:
+Save its reply verbatim to `$SCAN_DIR/flags.txt`, with a first line `mode: subagent` or `mode: same-agent`, then check it. The agent counts nothing — the check computes the file and added-line totals from the diff itself — and it answers for four things: its item lines are **exactly** the ids of the focus list and of the NER list (a missing, extra or repeated id is CANNOT-CHECK: a skipped NER id is a STOP, never a pass), every other flag points at a real added `file:line` or a real line of the commit message, PR title, PR body or branch name, every flag's text is on what it cites (the focus item without its label, or its line or path; the NER item's text, unescaped; the cited line) as whole words — the rule the brief declares: at least 2 characters, one a letter or digit, no letter, digit or combining mark running on past either end (camelCase steps break: `get|ACME|Token`, `HTTP|Server`; so does a source escape ending right before it, `\u00a0|Name`, never decoded), NFC-normalised, any whitespace run as one space, otherwise verbatim, and the reply says `none found` when it flags nothing:
 
 ```bash
 # --- push-skill: flags-check ---
@@ -767,7 +766,7 @@ PY
 cat "$SCAN_DIR/digest.txt"
 ```
 
-**Paste this view verbatim into your reply text, in full, as one fenced block** — every line the block printed, in its order: **Agent review** (the agent's flags grouped by the flagged text, case- and NFC-insensitive, each group with every reason and every place; the view refuses to build if a flag would go unshown), **Exact-match rules** (the pattern hits), **Blocking problems** with any warnings, **Files changed**, **Totals** and the footer. A summary, a paraphrase, a reordering or an excerpt is not the view, and a view that lives only in tool output has not been shown: on a remote or mobile surface the user cannot see tool output. A long view is pasted whole all the same. The view names no scratch file: the full change, the checklist (focus list), the detections (NER list) and the brief are `$SCAN_DIR/full.diff`, `vocab.txt`, `ner.txt` and `brief.txt` (5a printed them), opened only when the user asks. Do not open anything in an app for the user (the starters run on more than one OS). Then prompt the user via `AskUserQuestion` — **one decision for the whole run**:
+**Paste this view verbatim into your reply text, in full, as one fenced block** — every line the block printed, in its order: **Agent review** (the agent's flags grouped by the flagged text, case- and NFC-insensitive, each group with every reason and every place; the view refuses to build if a flag would go unshown), **Exact-match rules** (the pattern hits), **Blocking problems** with any warnings, **Files changed**, **Totals** and the footer. A summary, a paraphrase, a reordering or an excerpt is not the view, and a view that lives only in tool output has not been shown. A long view is pasted whole all the same. The view names no scratch file: the full change, the checklist (focus list), the detections (NER list) and the brief are `$SCAN_DIR/full.diff`, `vocab.txt`, `ner.txt` and `brief.txt` (5a printed them), opened only when the user asks. Do not open anything in an app for the user. Then prompt the user via `AskUserQuestion` — **one decision for the whole run**:
 
 > The agent flagged <nothing | K things in L places> across <V> checklist items and <N> scanner detections, and <no exact-match rule matched | P exact-match rules matched>. Does anything look wrong?
 >
@@ -777,7 +776,7 @@ cat "$SCAN_DIR/digest.txt"
 > - **Revert all** (`git reset -q --hard && git checkout main && git branch -D <change-slug>` in the template repo, then `rm -rf "$SCAN_DIR"`)
 > - **Show me X** — the full change, its checklist, the scanner detections, a staged file or a hunk
 
-Only proceed to step 6 on an explicit **Looks good — commit** for this view. Silence, an answer to an earlier view or an OK given before the view was pasted is not one. Then delete the sensitive artefacts (this includes the step-1 path inventories — `vault.all` lists every note title in the vault — and both step-4 lists). The list is step 4's `shred_findings` list, minus the two stamps; `find`, not an `rm` glob, because zsh aborts an `rm` whose glob matches nothing. It keeps `commit-msg.txt`, `pr-title.txt`, `pr-body.txt`, `coverage.txt`, the step-5 files and the stamps `scan.ok` and `flags.ok`, which step 6 re-checks before it commits:
+Only proceed to step 6 on an explicit **Looks good — commit** for this view. Silence, an answer to an earlier view or an OK given before the view was pasted is not one. Then delete the sensitive artefacts (this includes the step-1 path inventories — `vault.all` lists every note title in the vault — and both step-4 lists). The list is step 4's `shred_findings` list, minus the two stamps. It keeps `commit-msg.txt`, `pr-title.txt`, `pr-body.txt`, `coverage.txt`, the step-5 files and the stamps `scan.ok` and `flags.ok`, which step 6 re-checks before it commits:
 
 ```bash
 # --- push-skill: post-ok ---
@@ -802,7 +801,7 @@ git reset -q --hard && git checkout -q main && git branch -q -D "$DRY_BRANCH" &&
 
 ### 6. Commit, push, and open PR
 
-Commit with the scanned message (it carries the accept-with-reason lines). The commit block first runs the stamps check — its own marked block, `push-skill: stamps-check`, extracted and run, never copied. The check recomputes the stamp the way steps 4 and 5b wrote it and STOPs when either differs (a change or a message edited after the OK was never scanned, flagged or read), and it asserts `HEAD` is `BASE` (a commit already on the change branch carries a message no step scanned) and that `BASE` is published — an ancestor of `DEST_REF`, or for a stacked change of its own pushed ref — since a commit only on the local base rides along on the push unscanned.
+Commit with the scanned message (it carries the accept-with-reason lines). The commit block first runs the stamps check — its own marked block, `push-skill: stamps-check`, extracted and run, never copied. The check recomputes the stamp the way steps 4 and 5b wrote it and STOPs when either differs, and it asserts `HEAD` is `BASE` and that `BASE` is published — an ancestor of `DEST_REF`, or for a stacked change of its own pushed ref. On any of these STOPs nothing is committed; do what the message says.
 
 ```bash
 # --- push-skill: stamps-check ---
@@ -843,7 +842,7 @@ if [ -n "${PR_BASE:-}" ]; then gh pr create --base "$PR_BASE" --title "$(cat "$S
 else                           gh pr create                   --title "$(cat "$SCAN_DIR/pr-title.txt")" --body-file "$SCAN_DIR/pr-body.txt"; fi
 ```
 
-(`PR_BASE` is the parent PR's branch for a stacked change; unset otherwise. Two literal invocations rather than `${PR_BASE:+--base "$PR_BASE"}`, which zsh expands to one word.) The PR body keeps the genericization checklist:
+(`PR_BASE` is the parent PR's branch for a stacked change; unset otherwise. Keep the two literal invocations.) The PR body keeps the genericization checklist:
 
 ```markdown
 ## Summary
@@ -890,4 +889,4 @@ A structured report (the items in §7) plus the PR URL(s).
 - The template's `pre-push` hook (`.openbrain/pre-push.sh`) is a protected-remote URL guard only — it scans no content and no commit messages. Step 4 is the content check; do not treat the hook as a backstop.
 - If the user asks `/push-openbrain-template all` and the diff is huge, batch the work change-by-change with a brief progress line, rather than one giant report.
 - This skill is itself a candidate for porting. The template version helps users keep their personal forks in sync with their own upstreams.
-- Callers (any skill layered on these blocks, for enumerate/scan) extract the marked block range (`# --- push-skill: <name> ---` through the closing fence) and never read this file whole — a whole-file read is a ~70% per-run cost increase. Extraction runs through the shared helper, `.openbrain/lib/extract-block.sh` (ships alongside this skill) — see `/pull-openbrain-template`'s Notes for the command form (both `<file>` and the helper's own path always absolute — a caller's cwd may have moved into a clone) and cost figure. `deny()` and `in_roots()` are no longer extracted from this file's live text by anyone — every sync skill, including `/pull-openbrain-template`'s plan block, sources them directly from `.openbrain/lib/template-scope.sh`. Likewise `focus_brief()` (5a's two builders) and `flags_check()` (5b's reply check) live in `.openbrain/lib/flag-pass.sh`, sourced by this skill.
+- Callers (any skill layered on these blocks, for enumerate/scan) extract the marked block range (`# --- push-skill: <name> ---` through the closing fence) and never read this file whole. Extraction runs through the shared helper, `.openbrain/lib/extract-block.sh` (ships alongside this skill) — see `/pull-openbrain-template`'s Notes for the command form (both `<file>` and the helper's own path always absolute — a caller's cwd may have moved into a clone). `deny()` and `in_roots()` are sourced from `.openbrain/lib/template-scope.sh`, and `focus_brief()` (5a's two builders) and `flags_check()` (5b's reply check) from `.openbrain/lib/flag-pass.sh`, by this skill — never extracted from this file.

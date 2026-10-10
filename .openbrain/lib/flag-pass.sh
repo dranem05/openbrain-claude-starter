@@ -1,36 +1,34 @@
-# flag-pass.sh — the agent flag pass's two builders and its reply check, used by
-# /push-openbrain-template: focus_brief (step 5a, `push-skill: full-diff`) writes
-# the focus list and the agent's brief; flags_check (step 5b,
-# `push-skill: flags-check`) checks the agent's reply. Shared executable logic
-# lives here, in .openbrain/lib/, sourced, never extracted from a skill's
-# markdown. Sourced (never executed), always by absolute path — a calling
-# block may have `cd`ed into the template clone:
+# flag-pass.sh — the agent flag pass's two builders and its reply check, ONE
+# definition for /push-openbrain-template (step 5a full-diff, step 5b
+# flags-check).
+# Sourced (never executed), always by absolute path — a caller's preflight
+# routinely `cd`s into the template clone first:
 #
-#   FP="${VAULT:?}/.openbrain/lib/flag-pass.sh"; [ -f "$FP" ] || { echo "STOP: CANNOT-CHECK — …"; exit 1; }
+#   FP="${VAULT:?}/.openbrain/lib/flag-pass.sh"; [ -f "$FP" ] || { echo "STOP: CANNOT-CHECK — .openbrain/lib/flag-pass.sh is missing or did not load; …"; exit 1; }
 #   . "$FP"; typeset -f focus_brief >/dev/null 2>&1 && typeset -f flags_check >/dev/null 2>&1 || { echo "STOP: …(the same line)"; exit 1; }
 #
 # `typeset -f`, not `type`: a same-named binary on PATH must not satisfy the
-# check. Each function is a subshell `name() ( … )`, so a failure inside it
-# ends only the function, with a nonzero rc — after its own `STOP: CANNOT-CHECK
-# — …` line, or the shell's own message for an unset variable — and its
-# variables never leak into the caller; every call branches on the rc —
-# `focus_brief || exit 1` — never bare.
+# check. Every call branches on the rc — `focus_brief || exit 1` — never bare:
+# each function is a subshell `name() ( … )`, so its `exit 1` ends only the
+# function with a nonzero rc (after its own `STOP: CANNOT-CHECK — …` line, or
+# the shell's own message for an unset variable), and
+# its `umask`/variables never leak into the caller. Neither function `cd`s:
+# the caller owns the cwd (focus_brief runs git in it — the template clone).
 #
-# Interface is env-based: focus_brief runs in the caller's cwd (the template
-# clone), under umask 077, reads SCAN_DIR (full.diff, paths-5a.txt), BASE and VAULT,
+# Interface is env-based: focus_brief reads SCAN_DIR, BASE, VAULT
 # and writes $SCAN_DIR/vocab.txt + brief.txt; flags_check reads SCAN_DIR and
 # writes $SCAN_DIR/flags.ok on a pass only.
 #
-# Not _common.sh: that file deploys to the MCP runtime and is drift-checked
-# there. This name does not match `*-mcp.sh`, so register-mcps.sh and
-# reconcile-runtime.sh never deploy or check it. No `set -e`, no top-level
-# `exit`; bash-3.2/zsh-safe.
+# Never deployed to the MCP runtime: the name does not match `*-mcp.sh`, so
+# register-mcps.sh and reconcile-runtime.sh never deploy or check it. Where it
+# came from, and why not _common.sh: bootstrap/PII-SCAN-CONTRACT.md, "Design
+# notes". No `set -e`, no top-level `exit`; bash-3.2/zsh-safe.
 
 FLAG_PASS_FAKES_REL=bootstrap/lib/pii-fakes.txt   # relative to $VAULT: the one definition — focus_brief reads it, full-diff names it on its last line
 
 focus_brief() (
 umask 077; : "${SCAN_DIR:?}"; : "${BASE:?}"; [ -s "$SCAN_DIR/full.diff" ] && [ -f "$SCAN_DIR/paths-5a.txt" ] || { echo "STOP: CANNOT-CHECK — focus-brief needs $SCAN_DIR/full.diff and paths-5a.txt (its caller writes them)"; exit 1; }
-FILE_EXTS='md sh py json txt tsv csv yml yaml toml js ts mjs lst log diff patch example html css plist'   # the same literal as step 4's
+FILE_EXTS='md sh py json txt tsv csv yml yaml toml js ts mjs lst log diff patch example html css plist'   # the one definition (no other copy in the vault)
 python3 - "$SCAN_DIR/full.diff" "$BASE" "$SCAN_DIR/paths-5a.txt" "$FILE_EXTS" > "$SCAN_DIR/vocab.txt" <<'PY' || { echo "STOP: CANNOT-CHECK — vocabulary builder failed (reading the tree at $BASE, or an unparseable diff)"; exit 1; }
 import re, subprocess, sys
 diff, base, pathsz, exts = sys.argv[1], sys.argv[2], sys.argv[3], set(sys.argv[4].split())
@@ -89,7 +87,7 @@ out += ["%s:%d | (filename) %s | new: %s" % (f, n, nm, ", ".join(dict.fromkeys(n
 out += ["%s:%d | (code token) %s | new: %s" % (f, n, w, w) for w, (f, n) in sorted(code.items())]
 for i, l in enumerate(out, 1): print("v%d | %s" % (i, l))
 PY
-# the agent's brief, generated: the fakes rule is built from bootstrap/lib/pii-fakes.txt at every run, never written into this skill
+# the agent's brief, generated: the fakes rule is built from bootstrap/lib/pii-fakes.txt at every run, never written into this lib
 FAKES="${VAULT:?}/$FLAG_PASS_FAKES_REL"
 [ -s "$FAKES" ] || { echo "STOP: CANNOT-CHECK — the declared-fakes list is missing at $FAKES; restore it from git (it ships with the scanner contract)"; exit 1; }
 python3 - "$FAKES" "$SCAN_DIR" > "$SCAN_DIR/brief.txt" <<'PY' || { cat "$SCAN_DIR/brief.txt" >&2; rm -f "$SCAN_DIR/brief.txt"; echo "STOP: CANNOT-CHECK — could not build the agent brief from $FAKES (see above)"; exit 1; }
